@@ -2732,9 +2732,11 @@ if(fixdate > 0) d.setTime(d.getTime() + d.getTimezoneOffset() * 60 * 1000);
 }
 
 function cc2str(arr) {
-	var o = "";
-	for(var i = 0; i != arr.length; ++i) o += String.fromCharCode(arr[i]);
-	return o;
+	// Anders: Optimize performance
+	return new TextDecoder("utf-8").decode(arr);
+	//var o = "";
+	//for(var i = 0; i != arr.length; ++i) o += String.fromCharCode(arr[i]);
+	//return o;
 }
 
 function dup(o) {
@@ -7533,8 +7535,10 @@ var PRN = (function() {
 			case 'string': str = d; break;
 			default: throw new Error("Unrecognized type " + opts.type);
 		}
-		if(bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) str = utf8read(str.slice(3));
-		else if((opts.type == 'binary') && typeof cptable !== 'undefined' && opts.codepage)  str = cptable.utils.decode(opts.codepage, cptable.utils.encode(1252,str));
+		// Anders: Optimize performance
+		//if(bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) str = utf8read(str.slice(3));
+		//else
+			if((opts.type == 'binary') && typeof cptable !== 'undefined' && opts.codepage)  str = cptable.utils.decode(opts.codepage, cptable.utils.encode(1252,str));
 		if(str.slice(0,19) == "socialcalc:version:") return ETH.to_sheet(opts.type == 'string' ? str : utf8read(str), opts);
 		return prn_to_sheet_str(str, opts);
 	}
@@ -8093,7 +8097,13 @@ function parse_sst_xml(data, opts) {
 	/* 18.4.9 sst CT_Sst */
 	var sst = data.match(sstr0);
 	if(sst) {
-		ss = sst[2].replace(sstr1,"").split(sstr2);
+
+		let replaced = sst[2].replace(sstr1, "")
+
+		let replacementData = replaced.match(sstr2);
+		let ss = replaced.split(replacementData[0]);
+
+		//ss = sst[2].replace(sstr1,"").split(sstr2);
 		for(var i = 0; i != ss.length; ++i) {
 			var o = parse_si(ss[i].trim(), opts);
 			if(o != null) s[s.length] = o;
@@ -13143,7 +13153,22 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles) {
 	var sharedf = [];
 	var dense = Array.isArray(s);
 	var rows = [], rowobj = {}, rowrite = false;
-	for(var marr = sdata.split(rowregex), mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
+
+	let matchString = sdata.match(rowregex);
+
+  	var marr = null
+	if (matchString.length) {
+      marr = sdata.split(matchString[0]);
+	} else {
+      marr = sdata.split(rowregex);
+	}
+
+	for(mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
+
+		if (opts.callback && mt % 500 === 0) {
+			opts.callback({ stage: "parse_sheets", opts: opts, row: mt, rows: marr.length });
+		}
+
 		x = marr[mt].trim();
 		var xlen = x.length;
 		if(xlen === 0) continue;
@@ -20108,6 +20133,10 @@ function parse_zip(zip, opts) {
 
 	/* Numbers iOS hack */
 	var nmode = (getzipdata(zip,"xl/worksheets/sheet.xml",true))?1:0;
+
+  	opts.total_sheets = props.Worksheets;
+  	opts.sheet_names = props.SheetNames;
+
 	for(i = 0; i != props.Worksheets; ++i) {
 		var stype = "sheet";
 		if(wbrels && wbrels[i]) {
@@ -20120,6 +20149,8 @@ function parse_zip(zip, opts) {
 			path = path.replace(/sheet0\./,"sheet.");
 		}
 		relsPath = path.replace(/^(.*)(\/)([^\/]*)$/, "$1/_rels/$3.rels");
+		opts.current_sheet = i;
+
 		safe_parse_sheet(zip, path, relsPath, props.SheetNames[i], i, sheetRels, sheets, stype, opts, wb, themes, styles);
 	}
 
